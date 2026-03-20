@@ -71,6 +71,7 @@ class SessionState:
     active_prompt_names: list[str] = field(default_factory=list)
     pending_query: str | None = None
     last_query: str | None = None
+    last_plan_query: str | None = None
     last_reply: str | None = None
     pending_approval: bool = False
     last_failed_step: int | None = None
@@ -111,7 +112,7 @@ def initial_state() -> SessionState:
         ),
         StreamEntry(
             "reasoning",
-            "Type a prompt to talk with the agent or stage a plan. Read-only workspace inspection can appear inline in the stream, and /thinking toggles Bedrock thinking mode for future live Claude turns.",
+            "Type a prompt to talk with the agent. Read-only workspace inspection can appear inline in the stream, and /plan <request> is the explicit entry point for plan mode.",
         ),
     ]
     return state

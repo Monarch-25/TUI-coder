@@ -9,14 +9,15 @@
 
 ## Implemented UX
 
-- Informational prompts can now stay in conversation mode and use inline read-only tools before answering.
-- Actionable prompts still stage a plan, keep it hidden until `/plan`, then pause behind an approval gate.
+- Plain prompts now stay in conversation mode by default and can use inline read-only tools before answering.
+- Plan mode is explicit: `/plan <request>` stages a plan, reveals the plan panel, and pauses behind the mock approval gate.
 - `/approve`, `/reject`, `/retry`, `/plan`, `/logs`, `/expand`, `/model`, `/vcs ...`, `/cost`, `/flows`, `/export`, `/clear`, `/exit`, and `/help` are wired into local state changes.
 - `/thinking on`, `/thinking off`, and `/thinking budget <n>` are now available and stored in session state.
 - The input bar now autocompletes slash commands from the built-in command surface.
 - `/upload <file>` simulates document ingestion so the UI can show the intended operator journey before real parsers exist.
 - Session export writes markdown and JSON summaries to `exports/`.
 - The default screen is stream-first: `operator>`, `agent_reasoning>`, `tool>`, `tool_output>`, and `agent>` lines live in one transcript. Execution stays hidden until approval.
+- The conversation transcript is now scrollable instead of being a fixed static panel.
 - If Bedrock thinking mode is enabled and AWS is configured later, thinking deltas are meant to stream into `agent_reasoning>` while final text streams into `agent>`.
 
 ## Current State
@@ -53,3 +54,5 @@
 - Refactored the stream into a typed coder transcript with inline reasoning, tool calls, tool output, and assistant replies.
 - Added read-only conversation tools for workspace listing, search, file reads, and git status.
 - Added `/thinking` command handling plus a Bedrock Claude streaming adapter that can request extended thinking when AWS is configured.
+- Removed implicit plan routing from normal prompts so the default UX is pure conversation unless the operator explicitly enters `/plan`.
+- Replaced the static conversation widget with a scrollable transcript panel so long sessions can be reviewed.

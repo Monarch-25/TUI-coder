@@ -6,8 +6,9 @@ from dataclasses import dataclass
 
 COMMAND_HELP: dict[str, str] = {
     "/upload <file>": "Stage a local document or audio file for the mock session.",
-    "/run": "Restage the last prompt so you can replay the UX.",
-    "/plan": "Toggle the hidden plan panel.",
+    "/run": "Restage the most recent explicit plan-mode request.",
+    "/plan <request>": "Enter plan mode explicitly for a request and reveal the plan panel.",
+    "/plan": "Toggle the hidden plan panel after a plan has been staged.",
     "/logs": "Toggle the hidden logs panel.",
     "/thinking on|off|budget <n>": "Toggle Bedrock Claude thinking mode or set its token budget.",
     "/exit": "Exit the TUI.",
@@ -38,6 +39,7 @@ COMMAND_SUGGESTIONS: tuple[str, ...] = (
     "/logs",
     "/model sonnet",
     "/model opus",
+    "/plan ",
     "/plan",
     "/reject",
     "/retry",
@@ -75,7 +77,7 @@ def help_text() -> str:
     lines = ["Slash commands available in this prototype:"]
     for command, description in COMMAND_HELP.items():
         lines.append(f"{command:<22} {description}")
-    lines.append("Tip: the default view is stream-first. Use /plan or /logs only when you want those panels.")
+    lines.append("Tip: plain prompts always stay in conversation mode. Use /plan <request> when you explicitly want planning.")
     lines.append("Tip: inline conversation turns can show reasoning, tool calls, and tool output without opening the logs panel.")
     lines.append("Tip: include the word 'retry' in a prompt if you want to exercise the /retry path.")
     return "\n".join(lines)

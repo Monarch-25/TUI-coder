@@ -19,13 +19,13 @@ class MockAgentOrchestrator:
         self.conversation = ConversationAgent(self.prompts)
         self.state.active_prompt_names = self.prompts.active_prompt_names()
 
-    async def stage_plan(self, query: str) -> None:
-        if self._should_reply_directly(query):
-            await self._handle_direct_reply(query)
-            return
+    async def handle_conversation_turn(self, query: str) -> None:
+        await self._handle_direct_reply(query)
 
+    async def stage_plan(self, query: str) -> None:
         self.state.pending_query = query
         self.state.last_query = query
+        self.state.last_plan_query = query
         self.state.last_reply = None
         self.state.last_failed_step = None
         self.state.demo_failure_step = self._pick_failure_step(query)
@@ -272,48 +272,6 @@ class MockAgentOrchestrator:
         if not self._last_entry_has_text("reply", reply):
             await self._stream_text("reply", reply)
         await self.bus.publish(AgentEvent(EventKind.REPLY, reply or "Conversation turn complete"))
-
-    def _should_reply_directly(self, query: str) -> bool:
-        lowered = query.lower().strip()
-        if not lowered:
-            return True
-        if lowered.startswith(("hi", "hello", "hey")):
-            return True
-        action_terms = (
-            "build",
-            "implement",
-            "create",
-            "fix",
-            "write",
-            "refactor",
-            "generate",
-            "ingest",
-            "upload",
-            "change",
-            "edit",
-        )
-        if lowered.startswith(("explain", "describe", "summarize", "review", "inspect", "compare")):
-            return not any(term in lowered for term in action_terms)
-        if any(
-            lowered.startswith(prefix)
-            for prefix in (
-                "what ",
-                "what's ",
-                "who ",
-                "how ",
-                "why ",
-                "can you ",
-                "do you ",
-                "are you ",
-                "which ",
-            )
-        ):
-            return not any(term in lowered for term in action_terms)
-        if "prompt" in lowered or "phase" in lowered or "status" in lowered:
-            return True
-        if any(term in lowered for term in ("codebase", "repo", "repository", "structure", "file", "files")):
-            return not any(term in lowered for term in action_terms)
-        return False
 
     async def _emit_conversation_signal(self, kind: str, text: str) -> None:
         if kind == "reasoning_stream":

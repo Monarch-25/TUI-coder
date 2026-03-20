@@ -48,7 +48,7 @@ class WorkflowBuilderApp(App[None]):
                 yield VCSPanel(id="vcs")
                 yield CommandPanel(id="commands")
         yield Input(
-            placeholder="Type a prompt or slash command. Start with /help or /thinking on.",
+            placeholder="Type a prompt for conversation, or use /plan <request> for plan mode.",
             suggester=SuggestFromList(COMMAND_SUGGESTIONS, case_sensitive=False),
             id="command-input",
         )
@@ -78,11 +78,11 @@ class WorkflowBuilderApp(App[None]):
                 return
             await self._handle_command(command)
             return
-        await self.orchestrator.stage_plan(value)
+        await self.orchestrator.handle_conversation_turn(value)
 
     async def action_rerun(self) -> None:
         if self.state.last_query:
-            await self.orchestrator.stage_plan(self.state.last_query)
+            await self.orchestrator.handle_conversation_turn(self.state.last_query)
         else:
             self._append_stream("warning", "There is no last prompt to rerun yet.")
             self._refresh_all()
@@ -135,9 +135,17 @@ class WorkflowBuilderApp(App[None]):
             case "help":
                 self._append_stream("system", help_text())
             case "plan":
-                self.state.show_plan = not self.state.show_plan
-                state = "shown" if self.state.show_plan else "hidden"
-                self._append_stream("system", f"Plan panel {state}.")
+                if command.args:
+                    plan_query = " ".join(command.args)
+                    await self.orchestrator.stage_plan(plan_query)
+                    self.state.show_plan = True
+                    return
+                if not self.state.plan_steps:
+                    self._append_stream("warning", "No staged plan yet. Use /plan <request> to enter plan mode.")
+                else:
+                    self.state.show_plan = not self.state.show_plan
+                    state = "shown" if self.state.show_plan else "hidden"
+                    self._append_stream("system", f"Plan panel {state}.")
             case "logs":
                 self.state.show_logs = not self.state.show_logs
                 state = "shown" if self.state.show_logs else "hidden"
@@ -156,11 +164,12 @@ class WorkflowBuilderApp(App[None]):
             case "run":
                 if self.state.pending_approval:
                     self._append_stream("warning", "A plan is already waiting for /approve or /reject.")
-                elif self.state.last_query:
-                    await self.orchestrator.stage_plan(self.state.last_query)
+                elif self.state.last_plan_query:
+                    await self.orchestrator.stage_plan(self.state.last_plan_query)
+                    self.state.show_plan = True
                     return
                 else:
-                    self._append_stream("warning", "No last prompt is available for /run.")
+                    self._append_stream("warning", "No staged-plan query is available for /run. Use /plan <request> first.")
             case "approve":
                 if not self.state.pending_approval:
                     self._append_stream("warning", "There is no staged plan to approve.")
@@ -307,6 +316,7 @@ class WorkflowBuilderApp(App[None]):
             "cost": self.state.cost,
             "thinking_enabled": self.state.thinking_enabled,
             "thinking_budget_tokens": self.state.thinking_budget_tokens,
+            "last_plan_query": self.state.last_plan_query,
             "active_prompt_names": self.state.active_prompt_names,
             "uploaded_files": self.state.uploaded_files,
             "stream_entries": [

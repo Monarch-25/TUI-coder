@@ -618,6 +618,9 @@ Every tool: `name` · `description` (fed to Claude) · Pydantic input schema · 
 - `tool_output>` the visible output snippet from that tool
 - `agent>` user-visible agent reply
 
+Plain prompts stay in this mode by default. Planning is entered explicitly with `/plan <request>`.
+The transcript must be vertically scrollable so long conversations remain inspectable without opening another panel.
+
 **Plan Panel** — hidden by default. Revealed with `/plan`. Displays the structured `Plan IR` only when the operator explicitly asks for it.
 
 **Execution Panel** — hidden until the plan is approved with `/approve`, then shown with step-by-step progress:
@@ -667,8 +670,9 @@ Every tool: `name` · `description` (fed to Claude) · Pydantic input schema · 
 | Command | Action |
 |---|---|
 | `/upload <file>` | Ingest a document or audio file |
-| `/run` | Re-run the last plan |
-| `/plan` | Toggle the hidden plan panel |
+| `/run` | Re-run the most recent explicit plan-mode request |
+| `/plan <request>` | Enter plan mode explicitly for a request and reveal the plan panel |
+| `/plan` | Toggle the hidden plan panel after a plan has been staged |
 | `/logs` | Toggle the hidden logs panel |
 | `/thinking on\|off\|budget <n>` | Toggle Claude thinking mode and its reasoning-token budget |
 | `/approve` | Approve a pending plan before execution |
@@ -760,7 +764,7 @@ This app should mirror that contract:
 
 **Principle 3 — Read-only conversation, approval-gated mutation**
 - Conversational turns may use read-only tools immediately for grounding: repo listing, search, file reads, git status.
-- Any action that writes, executes a task plan, or mutates workflow state remains behind `/approve`.
+- Any action that writes, executes a task plan, or mutates workflow state must be entered explicitly with `/plan <request>` and remains behind `/approve`.
 
 **Principle 4 — Detail in the stream, bulk detail behind panels**
 - The stream should contain enough tool output to justify the answer.

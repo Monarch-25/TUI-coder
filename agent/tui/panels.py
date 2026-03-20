@@ -3,7 +3,7 @@ from __future__ import annotations
 from rich.console import Group
 from rich.table import Table
 from rich.text import Text
-from textual.widgets import Static
+from textual.widgets import RichLog, Static
 
 from agent.core.session import PlanStep, SessionState, StreamEntry, TodoItem
 
@@ -49,15 +49,26 @@ class StatusBar(Static):
         self.update(table)
 
 
-class StreamPanel(Static):
+class StreamPanel(RichLog):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, auto_scroll=True, highlight=False, markup=False, wrap=True, **kwargs)
+
     def on_mount(self) -> None:
         self.border_title = "Conversation"
 
     def refresh_from_state(self, state: SessionState) -> None:
-        renderables = [self._render_entry(entry) for entry in state.stream_entries[-24:]]
+        was_at_end = self.is_vertical_scroll_end
+        saved_scroll_y = self.scroll_y
+        self.clear()
+        renderables = [self._render_entry(entry) for entry in state.stream_entries]
         if not renderables:
             renderables = [Text("Waiting for input...", style="italic #94a3b8")]
-        self.update(Group(*renderables))
+        for renderable in renderables:
+            self.write(renderable, scroll_end=False)
+        if was_at_end:
+            self.scroll_end(animate=False)
+        else:
+            self.scroll_to(y=saved_scroll_y, animate=False, immediate=True)
 
     def _render_entry(self, entry: StreamEntry) -> Text:
         prefix = {
@@ -171,7 +182,7 @@ class CommandPanel(Static):
         lines = [
             Text("/help      command surface", style="#f7c873"),
             Text("/thinking  toggle Claude thinking", style="#f7c873"),
-            Text("/plan      toggle plan panel", style="#f7c873"),
+            Text("/plan ...  enter plan mode", style="#f7c873"),
             Text("/logs      toggle logs panel", style="#f7c873"),
             Text("/exit      quit the app", style="#f7c873"),
             Text("/approve   execute staged plan", style="#f7c873"),
