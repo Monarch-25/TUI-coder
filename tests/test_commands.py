@@ -17,6 +17,7 @@ class CommandTests(unittest.TestCase):
     def test_command_suggestions_cover_common_slash_commands(self) -> None:
         self.assertIn("/help", COMMAND_SUGGESTIONS)
         self.assertIn("/plan", COMMAND_SUGGESTIONS)
+        self.assertIn("/thinking on", COMMAND_SUGGESTIONS)
         self.assertIn("/vcs log", COMMAND_SUGGESTIONS)
 
 

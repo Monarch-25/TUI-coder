@@ -3,18 +3,27 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from agent.core.conversation import ConversationAgent
+from agent.core.prompt import PromptLibrary
 from agent.core.session import PlanStep, SessionState, Snapshot, StreamEntry, TodoItem, short_sha
 from agent.tui.events import AgentEvent, EventBus, EventKind
 
 
 class MockAgentOrchestrator:
-    """Local-only orchestrator that simulates the Phase 1 event contract."""
+    """Prototype orchestrator for conversation, staged planning, and mock execution."""
 
     def __init__(self, state: SessionState, bus: EventBus) -> None:
         self.state = state
         self.bus = bus
+        self.prompts = PromptLibrary()
+        self.conversation = ConversationAgent(self.prompts)
+        self.state.active_prompt_names = self.prompts.active_prompt_names()
 
     async def stage_plan(self, query: str) -> None:
+        if self._should_reply_directly(query):
+            await self._handle_direct_reply(query)
+            return
+
         self.state.pending_query = query
         self.state.last_query = query
         self.state.last_reply = None
@@ -30,6 +39,7 @@ class MockAgentOrchestrator:
             TodoItem("Review staged plan", active=True),
             TodoItem("Execute approved steps"),
         ]
+        self.state.backend = "local"
         self.state.pending_approval = True
 
         self._append_stream("user", query)
@@ -53,6 +63,15 @@ class MockAgentOrchestrator:
                 {"query": query},
             )
         )
+        await self._stream_text(
+            "reply",
+            (
+                f"I've staged a {len(self.state.plan_steps)}-step plan. "
+                "Use /plan to inspect it or /approve to run it. "
+                f"Active prompt stack: {', '.join(self.state.active_prompt_names[:3])}."
+            ),
+        )
+        await self.bus.publish(AgentEvent(EventKind.REPLY, "Plan staged"))
 
     async def execute_staged_plan(self, *, retry_from_failed: bool = False) -> None:
         if not self.state.plan_steps:
@@ -194,12 +213,22 @@ class MockAgentOrchestrator:
         snapshots = list(self.state.snapshots[:2])
         flows = list(self.state.flows)
         branch = self.state.current_branch
+        model = self.state.model
+        backend = self.state.backend
+        thinking_enabled = self.state.thinking_enabled
+        thinking_budget_tokens = self.state.thinking_budget_tokens
+        active_prompt_names = list(self.state.active_prompt_names)
         export_dir = self.state.export_dir
         self.state.__dict__.update(SessionState().__dict__)
         self.state.uploaded_files = uploaded
         self.state.snapshots = snapshots
         self.state.flows = flows
         self.state.current_branch = branch
+        self.state.model = model
+        self.state.backend = backend
+        self.state.thinking_enabled = thinking_enabled
+        self.state.thinking_budget_tokens = thinking_budget_tokens
+        self.state.active_prompt_names = active_prompt_names
         self.state.export_dir = export_dir
         self.state.show_plan = False
         self.state.show_logs = False
@@ -215,6 +244,112 @@ class MockAgentOrchestrator:
     def create_branch(self, name: str) -> None:
         self.state.current_branch = name
         self.state.snapshots.insert(0, Snapshot(short_sha(), f"branch:{name}"))
+
+    async def _handle_direct_reply(self, query: str) -> None:
+        self.state.pending_query = None
+        self.state.last_query = query
+        self.state.last_reply = None
+        self.state.pending_approval = False
+        self.state.show_execution = False
+        self.state.plan_steps.clear()
+        self.state.logs.clear()
+        self.state.todo_items = [
+            TodoItem("Understand operator intent", done=True),
+            TodoItem("Answer directly in conversation mode", active=True),
+        ]
+        self.state.backend = "local"
+
+        self._append_stream("user", query)
+        await self.bus.publish(AgentEvent(EventKind.THINKING, "Conversation turn"))
+        await self._emit_entry(
+            "reasoning",
+            (
+                "Conversation mode is active. I can inspect the workspace with read-only tools inline, then answer in the same stream."
+            ),
+        )
+        reply = await self.conversation.handle_turn(query=query, state=self.state, emit=self._emit_conversation_signal)
+        self.state.last_reply = reply
+        if not self._last_entry_has_text("reply", reply):
+            await self._stream_text("reply", reply)
+        await self.bus.publish(AgentEvent(EventKind.REPLY, reply or "Conversation turn complete"))
+
+    def _should_reply_directly(self, query: str) -> bool:
+        lowered = query.lower().strip()
+        if not lowered:
+            return True
+        if lowered.startswith(("hi", "hello", "hey")):
+            return True
+        action_terms = (
+            "build",
+            "implement",
+            "create",
+            "fix",
+            "write",
+            "refactor",
+            "generate",
+            "ingest",
+            "upload",
+            "change",
+            "edit",
+        )
+        if lowered.startswith(("explain", "describe", "summarize", "review", "inspect", "compare")):
+            return not any(term in lowered for term in action_terms)
+        if any(
+            lowered.startswith(prefix)
+            for prefix in (
+                "what ",
+                "what's ",
+                "who ",
+                "how ",
+                "why ",
+                "can you ",
+                "do you ",
+                "are you ",
+                "which ",
+            )
+        ):
+            return not any(term in lowered for term in action_terms)
+        if "prompt" in lowered or "phase" in lowered or "status" in lowered:
+            return True
+        if any(term in lowered for term in ("codebase", "repo", "repository", "structure", "file", "files")):
+            return not any(term in lowered for term in action_terms)
+        return False
+
+    async def _emit_conversation_signal(self, kind: str, text: str) -> None:
+        if kind == "reasoning_stream":
+            self._append_stream_delta("reasoning", text)
+            await self.bus.publish(AgentEvent(EventKind.TOKEN_STREAM, text, {"role": "reasoning"}))
+            return
+        if kind == "reply_stream":
+            self._append_stream_delta("reply", text)
+            await self.bus.publish(AgentEvent(EventKind.TOKEN_STREAM, text, {"role": "reply"}))
+            return
+        await self._emit_entry(kind, text)
+
+    async def _emit_entry(self, role: str, text: str) -> None:
+        self._append_stream(role, text)
+        event_map = {
+            "tool": EventKind.TOOL_START,
+            "tool_output": EventKind.TOOL_OUTPUT,
+        }
+        event_kind = event_map.get(role, EventKind.THINKING)
+        await self.bus.publish(AgentEvent(event_kind, text, {"role": role}))
+
+    def _append_stream_delta(self, role: str, text: str) -> None:
+        if not text:
+            return
+        if self.state.stream_entries and self.state.stream_entries[-1].role == role and self.state.stream_entries[-1].meta.get(
+            "streaming"
+        ):
+            self.state.stream_entries[-1].text += text
+            return
+        self.state.stream_entries.append(StreamEntry(role=role, text=text, meta={"streaming": True}))
+
+    def _last_entry_has_text(self, role: str, text: str) -> bool:
+        if not self.state.stream_entries:
+            return False
+        entry = self.state.stream_entries[-1]
+        return entry.role == role and entry.text.strip() == text.strip()
 
     async def _stream_text(self, role: str, text: str) -> None:
         self._append_stream(role, "")

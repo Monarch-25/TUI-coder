@@ -9,6 +9,7 @@ description = "Phase 1 Textual prototype for an agentic workflow builder."
 readme = "APP_STATE.md"
 requires-python = ">=3.12"
 dependencies = [
+  "boto3>=1.35,<2",
   "rich>=13.7,<14",
   "textual>=0.58,<1.0",
   "typer>=0.12,<1.0",
@@ -19,4 +20,3 @@ agent = "agent.cli:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

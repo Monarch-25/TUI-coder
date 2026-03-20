@@ -26,4 +26,9 @@ def doctor() -> None:
     except ModuleNotFoundError:
         typer.echo("Textual is not installed in the current Python environment.")
         raise typer.Exit(code=1)
-    typer.echo("Textual is available.")
+    try:
+        import boto3  # noqa: F401
+    except ModuleNotFoundError:
+        typer.echo("Textual is available. boto3 is missing, so Bedrock conversation will fall back to local mode.")
+        return
+    typer.echo("Textual and boto3 are available.")

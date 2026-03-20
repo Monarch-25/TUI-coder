@@ -26,8 +26,8 @@
 7. [Phased Implementation Plan](#7-phased-implementation-plan)
    - [Phase 0 — Scaffolding](#phase-0--scaffolding--dev-environment)
    - [Phase 1 — TUI Shell (Textual)](#phase-1--tui-shell-textual)
-   - [Phase 2 — Document & Audio Ingestion](#phase-2--document--audio-ingestion)
-   - [Phase 3 — Bedrock + Planner/Executor Loop](#phase-3--bedrock--plannerexecutor-loop)
+   - [Phase 2 — Bedrock + Planner/Executor Loop](#phase-2--bedrock--plannerexecutor-loop)
+   - [Phase 3 — Document & Audio Ingestion](#phase-3--document--audio-ingestion)
    - [Phase 4 — Standard Tool Library](#phase-4--standard-tool-library)
    - [Phase 5 — Reflection Loop](#phase-5--reflection-loop)
    - [Phase 6 — Dynamic Tool Builder](#phase-6--dynamic-tool-builder)
@@ -614,6 +614,8 @@ Every tool: `name` · `description` (fed to Claude) · Pydantic input schema · 
 **Conversation Stream** — primary default view. It shows only:
 - `operator>` user prompt or slash-command-facing request
 - `agent_reasoning>` short, grey planning/execution intent
+- `tool>` the exact read-only tool or command being run
+- `tool_output>` the visible output snippet from that tool
 - `agent>` user-visible agent reply
 
 **Plan Panel** — hidden by default. Revealed with `/plan`. Displays the structured `Plan IR` only when the operator explicitly asks for it.
@@ -668,6 +670,7 @@ Every tool: `name` · `description` (fed to Claude) · Pydantic input schema · 
 | `/run` | Re-run the last plan |
 | `/plan` | Toggle the hidden plan panel |
 | `/logs` | Toggle the hidden logs panel |
+| `/thinking on\|off\|budget <n>` | Toggle Claude thinking mode and its reasoning-token budget |
 | `/approve` | Approve a pending plan before execution |
 | `/reject` | Reject the plan and ask for a new one |
 | `/retry` | Retry the last failed step |
@@ -717,6 +720,10 @@ class AgentApp(App):
         match event.kind:
             case EventKind.THINKING:
                 self.query_one("#stream", StreamPanel).push(event)
+            case EventKind.TOOL_START:
+                self.query_one("#stream", StreamPanel).push(event)
+            case EventKind.TOOL_OUTPUT:
+                self.query_one("#stream", StreamPanel).push(event)
             case EventKind.STEP_START:
                 self.query_one("#execution", ExecutionPanel).set_running(event.step)
             case EventKind.STEP_SUCCESS:
@@ -729,6 +736,72 @@ class AgentApp(App):
 
 `PlanPanel` and `CollapsibleLogs` stay hidden until `/plan` or `/logs` toggles them on. `ExecutionPanel` stays hidden until the staged plan is approved.
 
+### 5.7 Rich Coder Conversation Experience
+
+The strongest terminal coding agents feel "alive" because the UI is not just a chat log. Claude Code, Codex CLI, and OpenCode all make the operator feel in control by exposing the **decision trail** around the answer:
+- a persistent status line with model/session/sandbox context
+- a typed transcript, not a single undifferentiated text stream
+- explicit tool lifecycle visibility: why a tool ran, what ran, and what came back
+- progressive disclosure: high-signal conversation by default, deeper plan/log detail on demand
+- safe mode separation between read-only exploration and state-changing execution
+
+This app should mirror that contract:
+
+**Principle 1 — Typed transcript**
+- `operator>` captures the user turn
+- `agent_reasoning>` shows short decision text and model thinking deltas when available
+- `tool>` shows the exact tool/command selected
+- `tool_output>` shows the relevant output snippet
+- `agent>` shows the user-facing answer or approval request
+
+**Principle 2 — Reason before tool**
+- Before each tool call, the agent should explain *why* it is using that tool in one short grey line.
+- This is the key UX move that makes tool use feel intentional instead of noisy.
+
+**Principle 3 — Read-only conversation, approval-gated mutation**
+- Conversational turns may use read-only tools immediately for grounding: repo listing, search, file reads, git status.
+- Any action that writes, executes a task plan, or mutates workflow state remains behind `/approve`.
+
+**Principle 4 — Detail in the stream, bulk detail behind panels**
+- The stream should contain enough tool output to justify the answer.
+- Raw step logs, full payloads, and execution internals remain behind `/logs`.
+- Structured plan IR remains behind `/plan`.
+
+**Principle 5 — Status line is part of the product**
+- Surface: session id, active model, backend (`local` vs `bedrock`), thinking mode, tokens, cache, cost, approval mode, and branch.
+- This is not decoration; it is how operators stay oriented during long-running work.
+
+### 5.8 Conversation Event Model
+
+The conversation UI should be driven by typed events rather than ad hoc strings. This is the core architectural move behind a rich coder TUI.
+
+```python
+@dataclass
+class TranscriptEvent:
+    kind: Literal[
+        "user",
+        "reasoning",
+        "tool_call",
+        "tool_output",
+        "assistant",
+        "warning",
+        "system",
+    ]
+    text: str
+    meta: dict[str, Any] = field(default_factory=dict)
+```
+
+**Turn flow for a direct coder conversation**
+1. append `operator>` query
+2. append short `agent_reasoning>` explaining the next grounding step
+3. append `tool>` with the exact command/tool name
+4. append `tool_output>` with the relevant snippet
+5. repeat 2–4 as needed
+6. append streamed `agent_reasoning>` thinking deltas if Claude thinking mode is enabled
+7. append streamed `agent>` final answer
+
+This is the architecture to preserve even as the backend evolves from local heuristics to Bedrock tool use and later multi-agent execution.
+
 ---
 
 ## 6. Bedrock LLM Integration
@@ -736,9 +809,9 @@ class AgentApp(App):
 ### 6.1 Model routing
 
 ```python
-SONNET  = "anthropic.claude-3-5-sonnet-20241022-v2:0"   # default
-HAIKU   = "anthropic.claude-3-haiku-20240307-v1:0"       # cheap tasks
-OPUS    = "anthropic.claude-3-opus-20240229-v1:0"         # deep reasoning
+SONNET  = "anthropic.claude-sonnet-4-20250514-v1:0"      # default, thinking-capable
+HAIKU   = "anthropic.claude-haiku-4-5-20251001-v1:0"     # cheap tasks
+OPUS    = "anthropic.claude-opus-4-20250514-v1:0"        # deep reasoning, thinking-capable
 
 def select_model(purpose: str, session: Session) -> str:
     if session.config.force_opus:
@@ -757,6 +830,25 @@ def select_model(purpose: str, session: Session) -> str:
         case _:
             return SONNET
 ```
+
+### 6.1.1 Thinking Mode
+
+For Bedrock-backed Claude conversation turns, thinking mode is operator-controlled from the TUI:
+
+```python
+thinking = {
+    "type": "enabled",
+    "budget_tokens": session.thinking_budget_tokens,
+} if session.thinking_enabled else None
+```
+
+Behavior contract:
+- `/thinking on` enables Bedrock Claude extended thinking
+- `/thinking off` disables it
+- `/thinking budget <n>` changes the reasoning-token budget
+- thinking deltas stream into `agent_reasoning>` in grey
+- final user-facing text continues streaming into `agent>`
+- if Bedrock is unavailable locally, the TUI keeps the toggle state and falls back honestly to local conversation mode
 
 ### 6.2 Streaming client
 
@@ -894,9 +986,9 @@ aws configure --profile agent-dev
 [bedrock]
 profile = "agent-dev"
 region  = "us-east-1"
-sonnet  = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-haiku   = "anthropic.claude-3-haiku-20240307-v1:0"
-opus    = "anthropic.claude-3-opus-20240229-v1:0"
+sonnet  = "anthropic.claude-sonnet-4-20250514-v1:0"
+haiku   = "anthropic.claude-haiku-4-5-20251001-v1:0"
+opus    = "anthropic.claude-opus-4-20250514-v1:0"
 
 [agent]
 require_approval = false   # set true to gate execution behind /approve
@@ -935,6 +1027,8 @@ from asyncio import Queue
 class EventKind(Enum):
     THINKING       = auto()
     PLAN_READY     = auto()
+    TOOL_START     = auto()
+    TOOL_OUTPUT    = auto()
     STEP_START     = auto()
     STEP_SUCCESS   = auto()
     STEP_FAILURE   = auto()
@@ -977,7 +1071,64 @@ Wire a fake async function that emits `THINKING → PLAN_READY → STEP_START �
 
 ---
 
-### Phase 2 — Document & Audio Ingestion
+### Phase 2 — Bedrock + Planner/Executor Loop
+
+**Goal:** Deliver a real coder conversation experience first: direct conversation turns, inline read-only tools, Bedrock-backed Claude replies with optional thinking mode, then approval-gated planning/execution. No Reflection or Temporal yet.
+
+**Duration:** 4–5 days
+
+#### Steps
+
+**2.1 — `BedrockClient`** — streaming wrapper (Section 6.2) with thinking-mode support. Leave the invocation path in place even if local auth is unavailable.
+
+**2.2 — Conversation runtime**
+- read-only workspace tools for conversational grounding:
+  - workspace listing
+  - ripgrep search
+  - direct file reads
+  - git status
+- these run inline in the transcript without requiring `/approve`
+- each tool call must be preceded by one short reasoning line that explains why the tool was chosen
+
+**2.3 — Multi-prompt system prompt stack**
+- `conversation_system` — default terminal conversation behavior
+- `planner_system` — structured plan synthesis
+- `executor_system` — approved execution reporting
+- `conversation_summary` — turn compression for memory
+- `next_prompt_suggestion` — next useful operator prompt
+
+```python
+def build_system_prompt_stack(session: Session, tools: list[Tool]) -> dict[str, str]:
+    tool_list   = "\n".join(f"- {t.name}: {t.description}" for t in tools)
+    doc_summary = summarize_loaded_docs(session)
+    return {
+        "conversation": render_prompt("conversation_system", session),
+        "planner": render_prompt("planner_system", session),
+        "executor": render_prompt("executor_system", session),
+        "summary": render_prompt("conversation_summary", session),
+        "suggestions": render_prompt("next_prompt_suggestion", session),
+    }
+```
+
+**2.4 — Thinking-mode command**
+- `/thinking on`
+- `/thinking off`
+- `/thinking budget <n>`
+- when enabled and Bedrock is live, stream Claude thinking into `agent_reasoning>`
+
+**2.5 — Planner** — see Section 3.2. Outputs validated `Plan` Pydantic model.
+
+**2.6 — Executor** — see Section 3.3. Runs steps in sequence, emits TUI events.
+
+**2.7 — `/approve` gate** — if `require_approval = true` in config, pause after Plan is displayed and wait for `/approve` or `/reject` command.
+
+**2.8 — Prompt caching** — inject `cache_control` breakpoints per Section 6.3.
+
+**Milestone:** Full round-trip — user can talk to the agent in a coder-style transcript, see why tools were used and what they returned, optionally enable Claude thinking mode, and still stage coherent approval-gated plans for executable work.
+
+---
+
+### Phase 3 — Document & Audio Ingestion
 
 **Goal:** Accept PDF, CSV, DOCX, plain text, and audio. Parse into normalized chunks + DuckDB tables.
 
@@ -1023,52 +1174,6 @@ class IngestionPipeline:
 ```
 
 **Milestone:** Upload a PDF with tables and an MP3 — both indexed in DuckDB, SQL-queryable.
-
----
-
-### Phase 3 — Bedrock + Planner/Executor Loop
-
-**Goal:** Full Planner → Executor agent loop on top of the TUI. No Reflection or Temporal yet.
-
-**Duration:** 4–5 days
-
-#### Steps
-
-**3.1 — `BedrockClient`** — streaming wrapper (Section 6.2)
-
-**3.2 — System prompt assembly**
-```python
-def build_system_prompt(session: Session, tools: list[Tool]) -> str:
-    tool_list   = "\n".join(f"- {t.name}: {t.description}" for t in tools)
-    doc_summary = summarize_loaded_docs(session)
-    return f"""
-You are a document analysis agent operating in a terminal.
-
-## Loaded Documents
-{doc_summary}
-
-## Available Tools
-{tool_list}
-
-## Behaviour
-- Plan before acting. Output structured JSON plans.
-- Use TodoWrite for any task with more than 2 steps.
-- Explain WHY before calling a tool.
-- Never pass the full document to the LLM — use document_search or sql_query.
-- If a SQL query fails, inspect the schema first with sql_schema_inspect.
-- Output is terminal-rendered. No HTML.
-"""
-```
-
-**3.3 — Planner** — see Section 3.2. Outputs validated `Plan` Pydantic model.
-
-**3.4 — Executor** — see Section 3.3. Runs steps in sequence, emits TUI events.
-
-**3.5 — `/approve` gate** — if `require_approval = true` in config, pause after Plan is displayed and wait for `/approve` or `/reject` command.
-
-**3.6 — Prompt caching** — inject `cache_control` breakpoints per Section 6.3.
-
-**Milestone:** Full round-trip — user asks "What is the sentiment trend across this call transcript?", agent plans 3 steps, executes them, returns a coherent answer. Plan + execution shown live in TUI.
 
 ---
 

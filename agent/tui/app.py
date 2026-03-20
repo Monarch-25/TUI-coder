@@ -48,7 +48,7 @@ class WorkflowBuilderApp(App[None]):
                 yield VCSPanel(id="vcs")
                 yield CommandPanel(id="commands")
         yield Input(
-            placeholder="Type a prompt or slash command. Start with /help.",
+            placeholder="Type a prompt or slash command. Start with /help or /thinking on.",
             suggester=SuggestFromList(COMMAND_SUGGESTIONS, case_sensitive=False),
             id="command-input",
         )
@@ -105,6 +105,10 @@ class WorkflowBuilderApp(App[None]):
             self.sub_title = event.message
         elif event.kind == EventKind.PLAN_READY:
             self.sub_title = "Plan staged"
+        elif event.kind == EventKind.TOOL_START:
+            self.sub_title = f"Tool: {event.message}"
+        elif event.kind == EventKind.TOOL_OUTPUT:
+            self.sub_title = "Tool output received"
         elif event.kind == EventKind.AWAITING_APPROVAL:
             self.sub_title = "Awaiting approval"
         elif event.kind == EventKind.STEP_START:
@@ -138,6 +142,8 @@ class WorkflowBuilderApp(App[None]):
                 self.state.show_logs = not self.state.show_logs
                 state = "shown" if self.state.show_logs else "hidden"
                 self._append_stream("system", f"Logs panel {state}.")
+            case "thinking":
+                self._handle_thinking_command(command.args)
             case "exit":
                 self.exit()
                 return
@@ -232,6 +238,40 @@ class WorkflowBuilderApp(App[None]):
         else:
             self._append_stream("warning", f"No logs recorded for step {step_number}.")
 
+    def _handle_thinking_command(self, args: list[str]) -> None:
+        if not args:
+            mode = "on" if self.state.thinking_enabled else "off"
+            self._append_stream(
+                "system",
+                f"Thinking mode is {mode}. Budget {self.state.thinking_budget_tokens} tokens. Backend {self.state.backend}.",
+            )
+            return
+        action = args[0]
+        if action == "on":
+            self.state.thinking_enabled = True
+            self._append_stream(
+                "system",
+                f"Thinking mode enabled. Bedrock Claude turns will request up to {self.state.thinking_budget_tokens} reasoning tokens.",
+            )
+            return
+        if action == "off":
+            self.state.thinking_enabled = False
+            self._append_stream("system", "Thinking mode disabled.")
+            return
+        if action == "budget" and len(args) == 2:
+            try:
+                budget = int(args[1])
+            except ValueError:
+                self._append_stream("warning", "Thinking budget must be an integer.")
+                return
+            if budget < 1024:
+                self._append_stream("warning", "Thinking budget must be at least 1024 tokens.")
+                return
+            self.state.thinking_budget_tokens = budget
+            self._append_stream("system", f"Thinking budget set to {budget} tokens.")
+            return
+        self._append_stream("warning", "Usage: /thinking on|off|budget <tokens>")
+
     def _export_session(self) -> Path:
         self.state.export_dir.mkdir(parents=True, exist_ok=True)
         base = self.state.export_dir / f"session-{self.state.session_id}"
@@ -242,9 +282,11 @@ class WorkflowBuilderApp(App[None]):
             f"# Session {self.state.session_id}",
             "",
             f"- Model: `{self.state.model}`",
+            f"- Backend: `{self.state.backend}`",
             f"- Branch: `{self.state.current_branch}`",
             f"- Tokens: `{self.state.tokens}`",
             f"- Cost: `${self.state.cost:.4f}`",
+            f"- Thinking: `{'on' if self.state.thinking_enabled else 'off'}` ({self.state.thinking_budget_tokens})",
             "",
             "## Stream",
             "",
@@ -259,10 +301,22 @@ class WorkflowBuilderApp(App[None]):
         payload = {
             "session_id": self.state.session_id,
             "model": self.state.model,
+            "backend": self.state.backend,
             "branch": self.state.current_branch,
             "tokens": self.state.tokens,
             "cost": self.state.cost,
+            "thinking_enabled": self.state.thinking_enabled,
+            "thinking_budget_tokens": self.state.thinking_budget_tokens,
+            "active_prompt_names": self.state.active_prompt_names,
             "uploaded_files": self.state.uploaded_files,
+            "stream_entries": [
+                {
+                    "role": entry.role,
+                    "text": entry.text,
+                    "meta": entry.meta,
+                }
+                for entry in self.state.stream_entries
+            ],
             "plan_steps": [
                 {
                     "index": step.index,

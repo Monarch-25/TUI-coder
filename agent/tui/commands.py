@@ -9,6 +9,7 @@ COMMAND_HELP: dict[str, str] = {
     "/run": "Restage the last prompt so you can replay the UX.",
     "/plan": "Toggle the hidden plan panel.",
     "/logs": "Toggle the hidden logs panel.",
+    "/thinking on|off|budget <n>": "Toggle Bedrock Claude thinking mode or set its token budget.",
     "/exit": "Exit the TUI.",
     "/approve": "Approve the staged plan and begin mock execution.",
     "/reject": "Drop the staged plan and wait for a new prompt.",
@@ -41,6 +42,10 @@ COMMAND_SUGGESTIONS: tuple[str, ...] = (
     "/reject",
     "/retry",
     "/run",
+    "/thinking",
+    "/thinking budget ",
+    "/thinking off",
+    "/thinking on",
     "/upload ",
     "/vcs branch ",
     "/vcs diff ",
@@ -71,5 +76,6 @@ def help_text() -> str:
     for command, description in COMMAND_HELP.items():
         lines.append(f"{command:<22} {description}")
     lines.append("Tip: the default view is stream-first. Use /plan or /logs only when you want those panels.")
+    lines.append("Tip: inline conversation turns can show reasoning, tool calls, and tool output without opening the logs panel.")
     lines.append("Tip: include the word 'retry' in a prompt if you want to exercise the /retry path.")
     return "\n".join(lines)

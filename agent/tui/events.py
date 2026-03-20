@@ -9,6 +9,8 @@ from typing import Any
 class EventKind(Enum):
     THINKING = auto()
     PLAN_READY = auto()
+    TOOL_START = auto()
+    TOOL_OUTPUT = auto()
     STEP_START = auto()
     STEP_SUCCESS = auto()
     STEP_FAILURE = auto()

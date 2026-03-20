@@ -23,6 +23,8 @@ STREAM_STYLES = {
     "user": "bold #f7c873",
     "reply": "bold #f0f4ef",
     "warning": "#9aa5b1",
+    "tool": "bold #7dd3c7",
+    "tool_output": "#c0cad5",
 }
 
 
@@ -31,13 +33,15 @@ class StatusBar(Static):
         table = Table.grid(expand=True)
         table.add_column(ratio=2)
         table.add_column(ratio=2)
-        table.add_column(ratio=1)
+        table.add_column(ratio=2)
         table.add_column(ratio=1)
         table.add_column(ratio=1)
         approval = "awaiting /approve" if state.pending_approval else "live"
+        thinking = f"on:{state.thinking_budget_tokens}" if state.thinking_enabled else "off"
         table.add_row(
             f"[bold]Session[/bold] {state.session_id}",
-            f"[bold]Model[/bold] {state.model}  [bold]Branch[/bold] {state.current_branch}",
+            f"[bold]Model[/bold] {state.model}  [bold]Backend[/bold] {state.backend}",
+            f"[bold]Thinking[/bold] {thinking}  [bold]Branch[/bold] {state.current_branch}",
             f"[bold]Tokens[/bold] {state.tokens:,}",
             f"[bold]Cache[/bold] {state.cache_hit_rate:.0%}",
             f"[bold]Cost[/bold] ${state.cost:.4f}  [bold]Mode[/bold] {approval}",
@@ -50,7 +54,7 @@ class StreamPanel(Static):
         self.border_title = "Conversation"
 
     def refresh_from_state(self, state: SessionState) -> None:
-        renderables = [self._render_entry(entry) for entry in state.stream_entries[-14:]]
+        renderables = [self._render_entry(entry) for entry in state.stream_entries[-24:]]
         if not renderables:
             renderables = [Text("Waiting for input...", style="italic #94a3b8")]
         self.update(Group(*renderables))
@@ -62,8 +66,17 @@ class StreamPanel(Static):
             "user": "operator> ",
             "reply": "agent> ",
             "warning": "agent_reasoning> ",
+            "tool": "tool> ",
+            "tool_output": "tool_output> ",
         }[entry.role]
-        return Text(prefix + entry.text, style=STREAM_STYLES[entry.role])
+        lines = entry.text.splitlines() or [""]
+        body = Text()
+        for index, line in enumerate(lines):
+            leader = prefix if index == 0 else " " * len(prefix)
+            body.append(leader + line, style=STREAM_STYLES[entry.role])
+            if index != len(lines) - 1:
+                body.append("\n")
+        return body
 
 
 class PlanPanel(Static):
@@ -157,6 +170,7 @@ class CommandPanel(Static):
         del state
         lines = [
             Text("/help      command surface", style="#f7c873"),
+            Text("/thinking  toggle Claude thinking", style="#f7c873"),
             Text("/plan      toggle plan panel", style="#f7c873"),
             Text("/logs      toggle logs panel", style="#f7c873"),
             Text("/exit      quit the app", style="#f7c873"),

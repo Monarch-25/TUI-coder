@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 ModelName = Literal["sonnet", "opus"]
+BackendName = Literal["local", "bedrock"]
 StepStatus = Literal["pending", "running", "done", "failed", "retry", "awaiting"]
-StreamRole = Literal["system", "reasoning", "user", "reply", "warning"]
+StreamRole = Literal["system", "reasoning", "user", "reply", "warning", "tool", "tool_output"]
 
 
 def short_id() -> str:
@@ -22,6 +23,7 @@ def short_sha() -> str:
 class StreamEntry:
     role: StreamRole
     text: str
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,9 +53,12 @@ class PlanStep:
 class SessionState:
     session_id: str = field(default_factory=short_id)
     model: ModelName = "sonnet"
+    backend: BackendName = "local"
     tokens: int = 0
     cache_hit_rate: float = 0.91
     cost: float = 0.0
+    thinking_enabled: bool = False
+    thinking_budget_tokens: int = 2048
     current_branch: str = "main"
     uploaded_files: list[str] = field(default_factory=list)
     stream_entries: list[StreamEntry] = field(default_factory=list)
@@ -63,6 +68,7 @@ class SessionState:
     logs: dict[int, list[str]] = field(default_factory=dict)
     expanded_logs: set[int] = field(default_factory=set)
     flows: list[str] = field(default_factory=list)
+    active_prompt_names: list[str] = field(default_factory=list)
     pending_query: str | None = None
     last_query: str | None = None
     last_reply: str | None = None
@@ -91,14 +97,21 @@ def initial_state() -> SessionState:
         Snapshot(short_sha(), "layout_sketch"),
     ]
     state.flows = ["ui/demo-shell", "ui/approval-gate-preview"]
+    state.active_prompt_names = [
+        "conversation_system",
+        "planner_system",
+        "executor_system",
+        "conversation_summary",
+        "next_prompt_suggestion",
+    ]
     state.stream_entries = [
         StreamEntry(
             "system",
-            "Workflow Builder prototype booted. This shell is local-only and uses mock agent events.",
+            "Workflow Builder booted. Conversation can use inline read-only workspace tools today, and Bedrock-backed Claude turns can attach when the environment is configured.",
         ),
         StreamEntry(
             "reasoning",
-            "Type a prompt to stage a plan. Use /plan or /logs only when you want those hidden panels, then /approve to execute.",
+            "Type a prompt to talk with the agent or stage a plan. Read-only workspace inspection can appear inline in the stream, and /thinking toggles Bedrock thinking mode for future live Claude turns.",
         ),
     ]
     return state
