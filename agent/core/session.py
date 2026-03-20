@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+from agent.tools.base import ApprovalRequest
+
 ModelName = Literal["sonnet", "opus"]
 BackendName = Literal["local", "bedrock"]
 StepStatus = Literal["pending", "running", "done", "failed", "retry", "awaiting"]
@@ -74,6 +76,7 @@ class SessionState:
     last_plan_query: str | None = None
     last_reply: str | None = None
     pending_approval: bool = False
+    pending_tool_approval: ApprovalRequest | None = None
     last_failed_step: int | None = None
     demo_failure_step: int | None = None
     show_plan: bool = False
@@ -108,11 +111,11 @@ def initial_state() -> SessionState:
     state.stream_entries = [
         StreamEntry(
             "system",
-            "Workflow Builder booted. Conversation can use inline read-only workspace tools today, and Bedrock-backed Claude turns can attach when the environment is configured.",
+            "Workflow Builder booted. Conversation can use inline repo tools today, and Bedrock-backed Claude turns can attach when the environment is configured.",
         ),
         StreamEntry(
             "reasoning",
-            "Type a prompt to talk with the agent. Read-only workspace inspection can appear inline in the stream, and /plan <request> is the explicit entry point for plan mode.",
+            "Type a prompt to talk with the agent. Read-only repo tools can appear inline in the stream, tool approvals reuse /approve and /reject, and /plan <request> is the explicit entry point for staged multi-step work.",
         ),
     ]
     return state

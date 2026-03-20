@@ -617,6 +617,7 @@ Every tool: `name` · `description` (fed to Claude) · Pydantic input schema · 
 - `tool>` the exact read-only tool or command being run
 - `tool_output>` the visible output snippet from that tool
 - `agent>` user-visible agent reply
+- inline approval prompts when a tool wants to leave the workspace or run a non-allowlisted command
 
 Plain prompts stay in this mode by default. Planning is entered explicitly with `/plan <request>`.
 The transcript must be vertically scrollable so long conversations remain inspectable without opening another panel.
@@ -657,8 +658,11 @@ The transcript must be vertically scrollable so long conversations remain inspec
 | Element | Color |
 |---|---|
 | Default text | White |
-| Agent reasoning | Grey |
-| Success / tool result | Green |
+| Agent reasoning | Grey `#7f8b99` |
+| Operator text | Amber `#f2c572` |
+| Agent reply | Cool white `#edf3ff` |
+| Tool call | Cyan `#62d6e8` |
+| Tool output | Muted blue-grey `#b5c0cd` |
 | In-progress | Yellow |
 | Failure / error | Red |
 | Retry | Orange |
@@ -675,8 +679,8 @@ The transcript must be vertically scrollable so long conversations remain inspec
 | `/plan` | Toggle the hidden plan panel after a plan has been staged |
 | `/logs` | Toggle the hidden logs panel |
 | `/thinking on\|off\|budget <n>` | Toggle Claude thinking mode and its reasoning-token budget |
-| `/approve` | Approve a pending plan before execution |
-| `/reject` | Reject the plan and ask for a new one |
+| `/approve` | Approve a pending tool request or a staged plan |
+| `/reject` | Reject the pending tool request or staged plan |
 | `/retry` | Retry the last failed step |
 | `/expand <n>` | Expand logs for step N |
 | `/model sonnet\|opus` | Switch LLM model for this session |
@@ -764,7 +768,8 @@ This app should mirror that contract:
 
 **Principle 3 — Read-only conversation, approval-gated mutation**
 - Conversational turns may use read-only tools immediately for grounding: repo listing, search, file reads, git status.
-- Any action that writes, executes a task plan, or mutates workflow state must be entered explicitly with `/plan <request>` and remains behind `/approve`.
+- If a conversation turn wants to leave the workspace or run a non-allowlisted command, it pauses in-stream and waits for `/approve` or `/reject`.
+- Multi-step execution, file mutation, and broader workflow changes still belong behind `/plan <request>` and the staged approval flow.
 
 **Principle 4 — Detail in the stream, bulk detail behind panels**
 - The stream should contain enough tool output to justify the answer.
@@ -801,10 +806,32 @@ class TranscriptEvent:
 3. append `tool>` with the exact command/tool name
 4. append `tool_output>` with the relevant snippet
 5. repeat 2–4 as needed
-6. append streamed `agent_reasoning>` thinking deltas if Claude thinking mode is enabled
-7. append streamed `agent>` final answer
+6. if a tool crosses a boundary, append an approval request and pause until `/approve` or `/reject`
+7. append streamed `agent_reasoning>` thinking deltas if Claude thinking mode is enabled
+8. append streamed `agent>` final answer
 
 This is the architecture to preserve even as the backend evolves from local heuristics to Bedrock tool use and later multi-agent execution.
+
+### 5.9 Live Conversation Tool Subset
+
+The current coder-facing conversation tool set should mirror the most useful read/explore tools from Cline and similar agents, without pretending the full act-mode surface already exists:
+
+| Tool | Purpose | Conversation contract |
+|---|---|---|
+| `list_files` | Repo and folder discovery | Auto-runs inside workspace |
+| `search_files` | `rg`-style code and text search | Auto-runs inside workspace |
+| `read_file` | Direct file inspection | Auto-runs inside workspace |
+| `list_code_definition_names` | High-level code map | Auto-runs inside workspace |
+| `git_status` | Repo state grounding | Auto-runs inside workspace |
+| `execute_command` | Shell access for inspection | Auto-approve only for read-only allowlisted commands; otherwise ask |
+| `use_skill` | Load local domain skill packs | Auto-runs and exposes bundled docs/scripts |
+
+Deferred from the broader Cline-style set for later phases:
+- file write/edit/apply-patch tools
+- browser and web tools
+- MCP server tools
+- subagents
+- condensed memory / summarization tools as separate runtime tools
 
 ---
 
@@ -1087,12 +1114,17 @@ Wire a fake async function that emits `THINKING → PLAN_READY → STEP_START �
 
 **2.2 — Conversation runtime**
 - read-only workspace tools for conversational grounding:
-  - workspace listing
-  - ripgrep search
-  - direct file reads
-  - git status
+  - `list_files`
+  - `search_files`
+  - `read_file`
+  - `list_code_definition_names`
+  - `git_status`
+- approval-aware conversation tools:
+  - `execute_command`
+  - `use_skill`
 - these run inline in the transcript without requiring `/approve`
 - each tool call must be preceded by one short reasoning line that explains why the tool was chosen
+- if a tool wants to leave the workspace or run a non-allowlisted command, the turn pauses in the stream and waits for `/approve` or `/reject`
 
 **2.3 — Multi-prompt system prompt stack**
 - `conversation_system` — default terminal conversation behavior

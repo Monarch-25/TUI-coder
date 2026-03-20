@@ -12,8 +12,8 @@ COMMAND_HELP: dict[str, str] = {
     "/logs": "Toggle the hidden logs panel.",
     "/thinking on|off|budget <n>": "Toggle Bedrock Claude thinking mode or set its token budget.",
     "/exit": "Exit the TUI.",
-    "/approve": "Approve the staged plan and begin mock execution.",
-    "/reject": "Drop the staged plan and wait for a new prompt.",
+    "/approve": "Approve a pending tool request or the staged plan.",
+    "/reject": "Reject a pending tool request or drop the staged plan.",
     "/retry": "Retry the last failed step if the demo injected a failure.",
     "/expand <n>": "Toggle log expansion for step n.",
     "/model sonnet|opus": "Switch the displayed session model.",
@@ -78,6 +78,7 @@ def help_text() -> str:
     for command, description in COMMAND_HELP.items():
         lines.append(f"{command:<22} {description}")
     lines.append("Tip: plain prompts always stay in conversation mode. Use /plan <request> when you explicitly want planning.")
-    lines.append("Tip: inline conversation turns can show reasoning, tool calls, and tool output without opening the logs panel.")
+    lines.append("Tip: inline conversation turns can show reasoning, tool calls, tool output, and approval prompts without opening the logs panel.")
+    lines.append("Tip: the conversation tool set now includes `rg`-style search, file reads, code-definition listing, safe shell commands, and local skill packs.")
     lines.append("Tip: include the word 'retry' in a prompt if you want to exercise the /retry path.")
     return "\n".join(lines)

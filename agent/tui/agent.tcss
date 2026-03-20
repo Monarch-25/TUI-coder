@@ -1,14 +1,14 @@
 Screen {
-    background: #10151b;
-    color: #f0f4ef;
+    background: #0f141a;
+    color: #edf3ff;
 }
 
 #status {
     height: 3;
     dock: top;
-    background: #17202a;
-    color: #f7f1e3;
-    border: round #7dd3c7;
+    background: #151d26;
+    color: #edf3ff;
+    border: round #62d6e8;
     padding: 0 1;
     margin: 1 1 0 1;
 }
@@ -34,15 +34,15 @@ LogsPanel,
 TodoPanel,
 VCSPanel,
 CommandPanel {
-    background: #131b23;
-    border: round #4b6974;
+    background: #131a22;
+    border: round #425565;
     padding: 1;
-    color: #e5e9f0;
+    color: #edf3ff;
 }
 
 #stream {
     height: 2fr;
-    border: round #7dd3c7;
+    border: round #62d6e8;
 }
 
 #plan {
@@ -86,12 +86,12 @@ CommandPanel {
     dock: bottom;
     height: 3;
     margin: 0 1 1 1;
-    border: round #f7c873;
-    background: #17202a;
-    color: #f0f4ef;
+    border: round #f2c572;
+    background: #151d26;
+    color: #edf3ff;
 }
 
 Footer {
-    background: #17202a;
-    color: #f7f1e3;
+    background: #151d26;
+    color: #edf3ff;
 }

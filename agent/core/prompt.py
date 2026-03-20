@@ -5,11 +5,39 @@ from pathlib import Path
 from string import Template
 from typing import TYPE_CHECKING
 
+from agent.tools import ToolRegistry
+
 if TYPE_CHECKING:
     from agent.core.session import SessionState
 
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+CONVERSATION_TOOL_NAMES = (
+    "list_files",
+    "search_files",
+    "read_file",
+    "list_code_definition_names",
+    "git_status",
+    "execute_command",
+    "use_skill",
+)
+PLANNER_TOOL_NAMES = (
+    "list_files",
+    "search_files",
+    "read_file",
+    "list_code_definition_names",
+    "git_status",
+    "use_skill",
+)
+EXECUTION_TOOL_NAMES = (
+    "list_files",
+    "search_files",
+    "read_file",
+    "list_code_definition_names",
+    "git_status",
+    "execute_command",
+    "use_skill",
+)
 
 
 @dataclass(frozen=True)
@@ -31,16 +59,19 @@ LIVE_UTILITIES: tuple[UtilityDefinition, ...] = (
     UtilityDefinition("/plan", "Reveal the hidden plan panel for the current turn."),
     UtilityDefinition("/logs", "Reveal the hidden logs panel for the current turn."),
     UtilityDefinition("/thinking on|off|budget <n>", "Toggle Bedrock Claude thinking mode or set the reasoning-token budget."),
-    UtilityDefinition("/approve", "Approve a staged plan and begin execution."),
-    UtilityDefinition("/reject", "Reject a staged plan and clear it."),
+    UtilityDefinition("/approve", "Approve a pending tool request or a staged plan."),
+    UtilityDefinition("/reject", "Reject a pending tool request or a staged plan."),
     UtilityDefinition("/retry", "Retry the last failed step in a staged execution."),
     UtilityDefinition("/upload <file>", "Stage a local file for the session as simulated context."),
     UtilityDefinition("/vcs ...", "Inspect mock snapshot history, diffs, restore, and branching."),
     UtilityDefinition("/export", "Write the session summary to markdown and JSON."),
-    UtilityDefinition("workspace_files", "Inspect the current repo layout with a read-only workspace listing."),
-    UtilityDefinition("workspace_search", "Search the current workspace with ripgrep before answering code questions."),
-    UtilityDefinition("workspace_read", "Read a file directly from the workspace to answer file-specific questions."),
+    UtilityDefinition("list_files", "Inspect the current repo layout with ripgrep before answering repo questions."),
+    UtilityDefinition("search_files", "Search the current workspace with ripgrep before answering code questions."),
+    UtilityDefinition("read_file", "Read a file directly from the workspace to answer file-specific questions."),
+    UtilityDefinition("list_code_definition_names", "Map top-level classes and functions without reading full files first."),
     UtilityDefinition("git_status", "Inspect the local repository state before answering git-aware questions."),
+    UtilityDefinition("execute_command", "Run a command when inspection needs shell output. Read-only commands can be auto-approved; broader commands ask first."),
+    UtilityDefinition("use_skill", "Load a local skill pack like pdf, docx, or xlsx when the task is document-specific."),
 )
 
 
@@ -91,6 +122,7 @@ PROMPT_SPECS: tuple[PromptSpec, ...] = (
 class PromptLibrary:
     def __init__(self, prompts_dir: Path | None = None) -> None:
         self.prompts_dir = prompts_dir or PROMPTS_DIR
+        self.registry = ToolRegistry()
 
     def specs(self) -> tuple[PromptSpec, ...]:
         return PROMPT_SPECS
@@ -115,6 +147,7 @@ class PromptLibrary:
         model = state.model if state else "sonnet"
         branch = state.current_branch if state else "main"
         snapshot = state.head if state else "none"
+        skills = self.registry.skills.list()
         return {
             "session_id": session_id,
             "model": model,
@@ -124,7 +157,105 @@ class PromptLibrary:
             "live_utilities": self._format_utility_block(LIVE_UTILITIES),
             "planned_utilities": self._format_utility_block(PLANNED_UTILITIES),
             "prompt_stack": ", ".join(self.active_prompt_names()),
+            "approval_policy": self._approval_policy(),
+            "thinking_policy": self._thinking_policy(state),
+            "conversation_tools_xml": self._format_tools_xml(CONVERSATION_TOOL_NAMES),
+            "planner_tools_xml": self._format_tools_xml(PLANNER_TOOL_NAMES),
+            "execution_tools_xml": self._format_tools_xml(EXECUTION_TOOL_NAMES),
+            "skills_xml": self._format_skills_xml(skills),
+            "tool_selection_policy": self._tool_selection_policy(),
+            "mode_routing_policy": self._mode_routing_policy(),
         }
 
     def _format_utility_block(self, utilities: tuple[UtilityDefinition, ...]) -> str:
         return "\n".join(f"- {utility.name}: {utility.description}" for utility in utilities)
+
+    def _format_tools_xml(self, names: tuple[str, ...]) -> str:
+        blocks: list[str] = []
+        for name in names:
+            tool = self.registry.get(name)
+            if tool is None:
+                continue
+            schema = tool.schema()
+            blocks.append(
+                "\n".join(
+                    [
+                        f'<tool name="{tool.name}" permission="{tool.permission}">',
+                        f"<description>{tool.description}</description>",
+                        "<inputs>",
+                        self._format_input_properties(schema.get("input_schema", {}).get("properties", {})),
+                        "</inputs>",
+                        "</tool>",
+                    ]
+                )
+            )
+        return "\n".join(blocks) if blocks else "<toolset>none</toolset>"
+
+    def _format_input_properties(self, properties: dict[str, object]) -> str:
+        if not properties:
+            return "  <input name=\"none\">No parameters.</input>"
+        lines: list[str] = []
+        for name, meta in properties.items():
+            description = ""
+            if isinstance(meta, dict):
+                description = str(meta.get("description", "")).strip()
+            lines.append(f'  <input name="{name}">{description or "No description."}</input>')
+        return "\n".join(lines)
+
+    def _format_skills_xml(self, skills: list[object]) -> str:
+        if not skills:
+            return "<skills><skill name=\"none\">No local skills are currently available.</skill></skills>"
+        lines = ["<skills>"]
+        for skill in skills:
+            name = getattr(skill, "name", "unknown")
+            description = getattr(skill, "description", "No description provided.")
+            lines.append(f'  <skill name="{name}">{description}</skill>')
+        lines.append("</skills>")
+        return "\n".join(lines)
+
+    def _approval_policy(self) -> str:
+        return "\n".join(
+            [
+                "- No YOLO mode. Never assume broad or destructive permission.",
+                "- Read-only repo tools inside the workspace may run inline in conversation mode.",
+                "- Reads/searches outside the workspace must pause and wait for /approve or /reject.",
+                "- Non-allowlisted shell commands must pause and wait for /approve or /reject.",
+                "- Multi-step execution, file writes, and workflow mutation belong behind /plan <request> and then /approve.",
+                "- If approval is denied, report the denial honestly and continue with a narrower safe path when possible.",
+            ]
+        )
+
+    def _thinking_policy(self, state: SessionState | None) -> str:
+        enabled = state.thinking_enabled if state else False
+        budget = state.thinking_budget_tokens if state else 2048
+        return "\n".join(
+            [
+                f"- Thinking mode is currently {'enabled' if enabled else 'disabled'} for this session.",
+                f"- Configured thinking budget: {budget} tokens.",
+                "- Use extended thinking only when the task is complex, ambiguous, or tool-planning heavy.",
+                "- Do not force heavy thinking for greetings, direct factual questions, or straightforward repo lookups.",
+                "- If backend thinking is unavailable, keep agent_reasoning concise and operational instead of fabricating hidden chain-of-thought.",
+            ]
+        )
+
+    def _tool_selection_policy(self) -> str:
+        return "\n".join(
+            [
+                "- Use the minimum sufficient tool set for the current turn.",
+                "- Prefer orientation tools before deep reads when the repo area is still unclear.",
+                "- Prefer search_files before execute_command for code lookup tasks.",
+                "- Prefer read_file after search_files or when the operator names a specific file.",
+                "- Use use_skill when the task clearly matches a specialized local skill.",
+                "- Before every tool call, emit one short agent_reasoning line explaining why that tool is next.",
+            ]
+        )
+
+    def _mode_routing_policy(self) -> str:
+        return "\n".join(
+            [
+                "- Default to conversation mode for plain prompts.",
+                "- Route to plan mode only when the operator explicitly uses /plan <request> or clearly asks for staged executable work.",
+                "- In conversation mode, ground answers with read-only tools when useful and stay in the transcript.",
+                "- In plan mode, produce an approval-ready plan and wait for operator control rather than auto-switching into execution.",
+            ]
+        )

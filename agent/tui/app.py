@@ -162,7 +162,9 @@ class WorkflowBuilderApp(App[None]):
                     await self.orchestrator.simulate_upload(command.args[0])
                     return
             case "run":
-                if self.state.pending_approval:
+                if self.state.pending_tool_approval is not None:
+                    self._append_stream("warning", "A tool request is already waiting for /approve or /reject.")
+                elif self.state.pending_approval:
                     self._append_stream("warning", "A plan is already waiting for /approve or /reject.")
                 elif self.state.last_plan_query:
                     await self.orchestrator.stage_plan(self.state.last_plan_query)
@@ -171,12 +173,18 @@ class WorkflowBuilderApp(App[None]):
                 else:
                     self._append_stream("warning", "No staged-plan query is available for /run. Use /plan <request> first.")
             case "approve":
+                if self.orchestrator.has_pending_tool_approval():
+                    await self.orchestrator.approve_pending_tool()
+                    return
                 if not self.state.pending_approval:
-                    self._append_stream("warning", "There is no staged plan to approve.")
+                    self._append_stream("warning", "There is no staged plan or tool request to approve.")
                 else:
                     await self.orchestrator.execute_staged_plan()
                     return
             case "reject":
+                if self.orchestrator.has_pending_tool_approval():
+                    await self.orchestrator.reject_pending_tool()
+                    return
                 await self.orchestrator.reject_plan()
                 return
             case "retry":
@@ -317,6 +325,15 @@ class WorkflowBuilderApp(App[None]):
             "thinking_enabled": self.state.thinking_enabled,
             "thinking_budget_tokens": self.state.thinking_budget_tokens,
             "last_plan_query": self.state.last_plan_query,
+            "pending_tool_approval": (
+                {
+                    "tool_name": self.state.pending_tool_approval.tool_name,
+                    "display": self.state.pending_tool_approval.display,
+                    "message": self.state.pending_tool_approval.message,
+                }
+                if self.state.pending_tool_approval is not None
+                else None
+            ),
             "active_prompt_names": self.state.active_prompt_names,
             "uploaded_files": self.state.uploaded_files,
             "stream_entries": [

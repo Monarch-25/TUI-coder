@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from agent.core.conversation import ConversationAgent
+from agent.core.conversation import ConversationAgent, PendingConversationTurn
 from agent.core.prompt import PromptLibrary
 from agent.core.session import PlanStep, SessionState, Snapshot, StreamEntry, TodoItem, short_sha
 from agent.tui.events import AgentEvent, EventBus, EventKind
@@ -17,6 +17,7 @@ class MockAgentOrchestrator:
         self.bus = bus
         self.prompts = PromptLibrary()
         self.conversation = ConversationAgent(self.prompts)
+        self._pending_tool_turn: PendingConversationTurn | None = None
         self.state.active_prompt_names = self.prompts.active_prompt_names()
 
     async def handle_conversation_turn(self, query: str) -> None:
@@ -28,6 +29,8 @@ class MockAgentOrchestrator:
         self.state.last_plan_query = query
         self.state.last_reply = None
         self.state.last_failed_step = None
+        self.state.pending_tool_approval = None
+        self._pending_tool_turn = None
         self.state.demo_failure_step = self._pick_failure_step(query)
         self.state.show_execution = False
         self.state.plan_steps = self._build_plan(query)
@@ -199,6 +202,44 @@ class MockAgentOrchestrator:
         ]
         await self._stream_text("warning", "Plan rejected. Submit a new prompt to restage the workflow.")
 
+    def has_pending_tool_approval(self) -> bool:
+        return self.state.pending_tool_approval is not None and self._pending_tool_turn is not None
+
+    async def approve_pending_tool(self) -> None:
+        pending = self._pending_tool_turn
+        if pending is None or self.state.pending_tool_approval is None:
+            await self._stream_text("warning", "There is no pending tool approval.")
+            return
+        self.state.pending_tool_approval = None
+        await self._emit_entry(
+            "reasoning",
+            f"Approval granted for {pending.approval.tool_name}. Continuing the conversation turn.",
+        )
+        result = await self.conversation.resume_turn(pending=pending, state=self.state, emit=self._emit_conversation_signal)
+        self._pending_tool_turn = result.pending
+        self.state.pending_tool_approval = result.pending.approval if result.pending is not None else None
+        if result.reply:
+            self.state.last_reply = result.reply
+            if not self._last_entry_has_text("reply", result.reply):
+                await self._stream_text("reply", result.reply)
+        await self.bus.publish(AgentEvent(EventKind.REPLY, result.reply or "Conversation turn complete"))
+
+    async def reject_pending_tool(self) -> None:
+        pending = self._pending_tool_turn
+        if pending is None or self.state.pending_tool_approval is None:
+            await self._stream_text("warning", "There is no pending tool approval.")
+            return
+        self.state.pending_tool_approval = None
+        self._pending_tool_turn = None
+        reply = (
+            f"Stopped before running `{pending.approval.display}`. "
+            "If you still want that access, approve it next time or narrow the request to files inside the workspace."
+        )
+        self.state.last_reply = reply
+        await self._stream_text("warning", "Pending tool request denied.")
+        await self._stream_text("reply", reply)
+        await self.bus.publish(AgentEvent(EventKind.REPLY, reply))
+
     def toggle_log(self, step_number: int) -> bool:
         if step_number not in self.state.logs:
             return False
@@ -233,6 +274,8 @@ class MockAgentOrchestrator:
         self.state.show_plan = False
         self.state.show_logs = False
         self.state.show_execution = False
+        self.state.pending_tool_approval = None
+        self._pending_tool_turn = None
         self.state.stream_entries = [
             StreamEntry("system", "Conversation cleared. Uploaded files and VCS preview were preserved."),
         ]
@@ -250,6 +293,8 @@ class MockAgentOrchestrator:
         self.state.last_query = query
         self.state.last_reply = None
         self.state.pending_approval = False
+        self.state.pending_tool_approval = None
+        self._pending_tool_turn = None
         self.state.show_execution = False
         self.state.plan_steps.clear()
         self.state.logs.clear()
@@ -264,14 +309,17 @@ class MockAgentOrchestrator:
         await self._emit_entry(
             "reasoning",
             (
-                "Conversation mode is active. I can inspect the workspace with read-only tools inline, then answer in the same stream."
+                "Conversation mode is active. I can inspect the repo inline with tools like ripgrep, read files directly, and ask for approval before leaving the workspace or running a broader command."
             ),
         )
-        reply = await self.conversation.handle_turn(query=query, state=self.state, emit=self._emit_conversation_signal)
-        self.state.last_reply = reply
-        if not self._last_entry_has_text("reply", reply):
-            await self._stream_text("reply", reply)
-        await self.bus.publish(AgentEvent(EventKind.REPLY, reply or "Conversation turn complete"))
+        result = await self.conversation.handle_turn(query=query, state=self.state, emit=self._emit_conversation_signal)
+        self._pending_tool_turn = result.pending
+        self.state.pending_tool_approval = result.pending.approval if result.pending is not None else None
+        if result.reply:
+            self.state.last_reply = result.reply
+            if not self._last_entry_has_text("reply", result.reply):
+                await self._stream_text("reply", result.reply)
+        await self.bus.publish(AgentEvent(EventKind.REPLY, result.reply or "Conversation turn complete"))
 
     async def _emit_conversation_signal(self, kind: str, text: str) -> None:
         if kind == "reasoning_stream":

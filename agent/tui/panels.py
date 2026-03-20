@@ -18,13 +18,13 @@ STATUS_SYMBOLS = {
 }
 
 STREAM_STYLES = {
-    "system": "#9aa5b1",
-    "reasoning": "#9aa5b1",
-    "user": "bold #f7c873",
-    "reply": "bold #f0f4ef",
-    "warning": "#9aa5b1",
-    "tool": "bold #7dd3c7",
-    "tool_output": "#c0cad5",
+    "system": "#8ea0b5",
+    "reasoning": "#7f8b99",
+    "user": "bold #f2c572",
+    "reply": "#edf3ff",
+    "warning": "#ffb86b",
+    "tool": "bold #62d6e8",
+    "tool_output": "#b5c0cd",
 }
 
 
@@ -36,7 +36,13 @@ class StatusBar(Static):
         table.add_column(ratio=2)
         table.add_column(ratio=1)
         table.add_column(ratio=1)
-        approval = "awaiting /approve" if state.pending_approval else "live"
+        table.add_column(ratio=2)
+        if state.pending_tool_approval is not None:
+            approval = f"tool /approve ({state.pending_tool_approval.tool_name})"
+        elif state.pending_approval:
+            approval = "plan /approve"
+        else:
+            approval = "live"
         thinking = f"on:{state.thinking_budget_tokens}" if state.thinking_enabled else "off"
         table.add_row(
             f"[bold]Session[/bold] {state.session_id}",
@@ -54,7 +60,7 @@ class StreamPanel(RichLog):
         super().__init__(*args, auto_scroll=True, highlight=False, markup=False, wrap=True, **kwargs)
 
     def on_mount(self) -> None:
-        self.border_title = "Conversation"
+        self.border_title = "Transcript"
 
     def refresh_from_state(self, state: SessionState) -> None:
         was_at_end = self.is_vertical_scroll_end
@@ -185,7 +191,7 @@ class CommandPanel(Static):
             Text("/plan ...  enter plan mode", style="#f7c873"),
             Text("/logs      toggle logs panel", style="#f7c873"),
             Text("/exit      quit the app", style="#f7c873"),
-            Text("/approve   execute staged plan", style="#f7c873"),
+            Text("/approve   allow tool or plan", style="#f7c873"),
             Text("/model opus switch display model", style="#f7c873"),
             Text("/export    write session summary", style="#f7c873"),
         ]
