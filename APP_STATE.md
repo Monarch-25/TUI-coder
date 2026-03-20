@@ -10,6 +10,7 @@
 
 - Prompt submission stages a plan but keeps it hidden until `/plan`, then pauses behind an approval gate.
 - `/approve`, `/reject`, `/retry`, `/plan`, `/logs`, `/expand`, `/model`, `/vcs ...`, `/cost`, `/flows`, `/export`, `/clear`, `/exit`, and `/help` are wired into local state changes.
+- The input bar now autocompletes slash commands from the built-in command surface.
 - `/upload <file>` simulates document ingestion so the UI can show the intended operator journey before real parsers exist.
 - Session export writes markdown and JSON summaries to `exports/`.
 - The default screen is stream-first: `operator>`, `agent_reasoning>`, and `agent>` lines only. Execution stays hidden until approval.
@@ -38,3 +39,4 @@
 - Added this tracker so current scope and the next implementation targets remain explicit in the repo.
 - Verified the shell after `textual` became available in the `torch` environment.
 - Refined the UX so plan and logs are opt-in panels and execution only appears after approval.
+- Added slash-command autocomplete to the input bar.

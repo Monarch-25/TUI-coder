@@ -8,11 +8,12 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.suggester import SuggestFromList
 from textual.widgets import Footer, Input
 
 from agent.core.agent import MockAgentOrchestrator
 from agent.core.session import SessionState, StreamEntry, initial_state
-from agent.tui.commands import ParsedCommand, help_text, parse_command
+from agent.tui.commands import COMMAND_SUGGESTIONS, ParsedCommand, help_text, parse_command
 from agent.tui.events import AgentEvent, EventBus, EventKind
 from agent.tui.panels import CommandPanel, ExecutionPanel, LogsPanel, PlanPanel, StatusBar, StreamPanel, TodoPanel, VCSPanel
 
@@ -46,7 +47,11 @@ class WorkflowBuilderApp(App[None]):
                 yield TodoPanel(id="todo")
                 yield VCSPanel(id="vcs")
                 yield CommandPanel(id="commands")
-        yield Input(placeholder="Type a prompt or slash command. Start with /help.", id="command-input")
+        yield Input(
+            placeholder="Type a prompt or slash command. Start with /help.",
+            suggester=SuggestFromList(COMMAND_SUGGESTIONS, case_sensitive=False),
+            id="command-input",
+        )
         yield Footer()
 
     async def on_mount(self) -> None:

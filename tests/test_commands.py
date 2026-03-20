@@ -1,6 +1,6 @@
 import unittest
 
-from agent.tui.commands import help_text, parse_command
+from agent.tui.commands import COMMAND_SUGGESTIONS, help_text, parse_command
 
 
 class CommandTests(unittest.TestCase):
@@ -13,6 +13,11 @@ class CommandTests(unittest.TestCase):
         text = help_text()
         self.assertIn("/approve", text)
         self.assertIn("Tip:", text)
+
+    def test_command_suggestions_cover_common_slash_commands(self) -> None:
+        self.assertIn("/help", COMMAND_SUGGESTIONS)
+        self.assertIn("/plan", COMMAND_SUGGESTIONS)
+        self.assertIn("/vcs log", COMMAND_SUGGESTIONS)
 
 
 if __name__ == "__main__":

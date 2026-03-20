@@ -26,6 +26,29 @@ COMMAND_HELP: dict[str, str] = {
     "/help": "Show the available slash commands.",
 }
 
+COMMAND_SUGGESTIONS: tuple[str, ...] = (
+    "/approve",
+    "/clear",
+    "/cost",
+    "/exit",
+    "/export",
+    "/flows",
+    "/help",
+    "/logs",
+    "/model sonnet",
+    "/model opus",
+    "/plan",
+    "/reject",
+    "/retry",
+    "/run",
+    "/upload ",
+    "/vcs branch ",
+    "/vcs diff ",
+    "/vcs log",
+    "/vcs restore ",
+    "/expand ",
+)
+
 
 @dataclass(slots=True)
 class ParsedCommand:
