@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "workflow-builder-agent-ui"
+version = "0.1.0"
+description = "Phase 1 Textual prototype for an agentic workflow builder."
+readme = "APP_STATE.md"
+requires-python = ">=3.12"
+dependencies = [
+  "rich>=13.7,<14",
+  "textual>=0.58,<1.0",
+  "typer>=0.12,<1.0",
+]
+
+[project.scripts]
+agent = "agent.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

@@ -1,0 +1,97 @@
+Screen {
+    background: #10151b;
+    color: #f0f4ef;
+}
+
+#status {
+    height: 3;
+    dock: top;
+    background: #17202a;
+    color: #f7f1e3;
+    border: round #7dd3c7;
+    padding: 0 1;
+    margin: 1 1 0 1;
+}
+
+#body {
+    height: 1fr;
+    margin: 1;
+}
+
+#main-column {
+    width: 3fr;
+    margin-right: 1;
+}
+
+#sidebar {
+    width: 38;
+}
+
+StreamPanel,
+PlanPanel,
+ExecutionPanel,
+LogsPanel,
+TodoPanel,
+VCSPanel,
+CommandPanel {
+    background: #131b23;
+    border: round #4b6974;
+    padding: 1;
+    color: #e5e9f0;
+}
+
+#stream {
+    height: 2fr;
+    border: round #7dd3c7;
+}
+
+#plan {
+    height: 9;
+    border: round #f7c873;
+    margin-top: 1;
+}
+
+#execution {
+    height: 9;
+    border: round #ffb454;
+    margin-top: 1;
+}
+
+#logs {
+    height: 1fr;
+    border: round #7aa2f7;
+    margin-top: 1;
+}
+
+#todo,
+#vcs,
+#commands {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+#todo {
+    border: round #86efac;
+}
+
+#vcs {
+    border: round #7aa2f7;
+}
+
+#commands {
+    border: round #f7c873;
+}
+
+#command-input {
+    dock: bottom;
+    height: 3;
+    margin: 0 1 1 1;
+    border: round #f7c873;
+    background: #17202a;
+    color: #f0f4ef;
+}
+
+Footer {
+    background: #17202a;
+    color: #f7f1e3;
+}
